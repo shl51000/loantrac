@@ -35,6 +35,8 @@ export default function LoginPage() {
     });
 
     if (signInError || !data.user) {
+      // eslint-disable-next-line no-console
+      console.error("[LoanTrac] sign-in failed:", signInError);
       setError(wrongPassphraseMessage);
       setSubmitting(false);
       return;
@@ -47,6 +49,12 @@ export default function LoginPage() {
       .single();
 
     if (profileError || !profile || profile.role !== selectedRole) {
+      // eslint-disable-next-line no-console
+      console.error("[LoanTrac] profile/role check failed:", {
+        profileError,
+        profile,
+        selectedRole,
+      });
       // Credentials were valid but for a different role than the one picked.
       // Sign back out so no session is left behind for the wrong role.
       await supabase.auth.signOut();
