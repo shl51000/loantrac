@@ -27,7 +27,9 @@ export async function updateSession(request: NextRequest) {
 
   // Refresh the auth session if needed. Do not remove this call —
   // it keeps users logged in across requests.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return supabaseResponse;
+  return { supabaseResponse, user };
 }
