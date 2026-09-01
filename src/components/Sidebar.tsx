@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthProvider";
 import { formatDate, formatINR } from "@/lib/format";
 import { getReferralColor } from "@/lib/referralColors";
 import { getReminderCount } from "@/lib/reminders";
 import { exportBackup } from "@/lib/exportBackup";
-import RoleBadge from "@/components/RoleBadge";
+import { onLoansChanged } from "@/lib/loansRefresh";
+import { IconBarChart, IconPlus, IconCalendar, IconWarning, IconUsers } from "@/components/icons";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -38,11 +39,11 @@ interface ActiveLoan {
 }
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", primary: true },
-  { href: "/new-loan", label: "New loan" },
-  { href: "/calendar", label: "Repayment calendar" },
-  { href: "/reminders", label: "Reminders", showReminderBadge: true },
-  { href: "/borrowers", label: "Borrowers" },
+  { href: "/dashboard", label: "Dashboard", icon: IconBarChart, primary: true },
+  { href: "/new-loan", label: "New loan", icon: IconPlus },
+  { href: "/calendar", label: "Repayment calendar", icon: IconCalendar },
+  { href: "/reminders", label: "Reminders", icon: IconWarning, showReminderBadge: true },
+  { href: "/borrowers", label: "Borrowers", icon: IconUsers },
 ];
 
 export default function Sidebar() {
@@ -63,7 +64,7 @@ export default function Sidebar() {
   return (
     <>
       {isMobile && (
-        <div className="fixed top-0 left-0 right-0 z-30 h-14 bg-slate-900 flex items-center justify-between px-4">
+        <div className="print-hide fixed top-0 left-0 right-0 z-30 h-14 bg-slate-900 flex items-center gap-3 px-4">
           <button
             aria-label="Open menu"
             onClick={() => setDrawerOpen(true)}
@@ -73,8 +74,12 @@ export default function Sidebar() {
             <span className="block w-6 h-0.5 bg-white mb-1.5" />
             <span className="block w-6 h-0.5 bg-white" />
           </button>
-          <span className="text-white font-bold text-lg">LoanTrac</span>
-          <RoleBadge />
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 border-2 border-slate-300 flex items-center justify-center shrink-0">
+              <span className="text-[10px] font-serif font-bold text-teal-400">SF</span>
+            </div>
+            <span className="text-white font-bold text-lg">LoanTrac</span>
+          </div>
         </div>
       )}
 
@@ -87,10 +92,11 @@ export default function Sidebar() {
 
       <div
         className={
-          isMobile
+          "print-hide " +
+          (isMobile
             ? "fixed top-0 left-0 bottom-0 z-50 w-72 bg-slate-900 transform transition-transform duration-200 overflow-y-auto " +
               (drawerOpen ? "translate-x-0" : "-translate-x-full")
-            : "fixed top-0 left-0 bottom-0 w-64 bg-slate-900 overflow-y-auto"
+            : "fixed top-0 left-0 bottom-0 w-64 bg-slate-900 overflow-y-auto")
         }
       >
         <SidebarContent onNavigate={() => setDrawerOpen(false)} />
@@ -101,9 +107,8 @@ export default function Sidebar() {
 
 function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
   const [supabase] = useState(() => createClient());
-  const router = useRouter();
   const pathname = usePathname();
-  const { signOut, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
 
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [activeReferralId, setActiveReferralId] = useState<string | null>(null);
@@ -135,8 +140,14 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
   }, [supabase]);
 
   useEffect(() => {
-    loadData();
+    (async () => {
+      await loadData();
+    })();
   }, [loadData]);
+
+  useEffect(() => onLoansChanged(loadData), [loadData]);
+
+  const referralById = new Map(referrals.map((r) => [r.id, r]));
 
   const filteredLoans = loans.filter(
     (l) => !activeReferralId || l.referral_id === activeReferralId
@@ -157,11 +168,6 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
     }
   });
 
-  async function handleSwitchUser() {
-    await signOut();
-    router.push("/login");
-  }
-
   async function handleExport() {
     setExporting(true);
     try {
@@ -179,16 +185,22 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
 
   return (
     <div className="flex flex-col min-h-full text-slate-200 pb-4">
-      <div className="p-5 pb-4 hidden md:flex items-center justify-between">
-        <span className="text-white font-bold text-xl">LoanTrac</span>
-        <RoleBadge />
+      <div className="p-5 pb-4 hidden md:block">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 border-2 border-slate-300 flex items-center justify-center shrink-0">
+            <span className="text-sm font-serif font-bold text-teal-400">SF</span>
+          </div>
+          <span className="text-white font-bold text-lg leading-tight">LoanTrac</span>
+        </div>
+        <div className="text-teal-400 text-xs leading-tight mt-1 pl-[52px]">Payment &amp; XIRR tracker</div>
       </div>
 
       <nav className="px-3 space-y-1">
         {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
           const active = pathname === item.href;
           const base =
-            "flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors";
+            "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors";
           const style = item.primary
             ? "bg-teal-600 text-white hover:bg-teal-700"
             : active
@@ -201,7 +213,8 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
               onClick={onNavigate}
               className={`${base} ${style}`}
             >
-              <span>{item.label}</span>
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{item.label}</span>
               {item.showReminderBadge && reminderCount > 0 && (
                 <span className="bg-rose-600 text-white text-xs font-bold rounded-full px-2 py-0.5">
                   {reminderCount}
@@ -213,7 +226,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
       </nav>
 
       {referrals.length > 0 && (
-        <div className="px-3 mt-4 flex flex-wrap gap-1.5">
+        <div className="px-3 mt-3 flex flex-wrap gap-1.5">
           <button
             onClick={() => setActiveReferralId(null)}
             className={
@@ -245,10 +258,14 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         </div>
       )}
 
-      <div className="px-3 mt-4 flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-400 font-semibold">
+      <div className="px-3 mt-3 flex items-center justify-between">
+        <Link
+          href="/active-loans"
+          onClick={onNavigate}
+          className="text-xs uppercase tracking-wide text-slate-400 font-semibold hover:text-white"
+        >
           Active loans
-        </span>
+        </Link>
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortOption)}
@@ -272,60 +289,68 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
             .
           </p>
         )}
-        {sortedLoans.map((loan) => (
-          <Link
-            key={loan.id}
-            href={`/loans/${loan.id}`}
-            onClick={onNavigate}
-            className="block rounded-lg bg-slate-800/60 hover:bg-slate-800 px-3 py-2"
-          >
-            <div className="text-sm font-medium text-white truncate">
-              {loan.borrowers?.name ?? "Unknown borrower"}
-            </div>
-            <div className="text-xs text-slate-400 truncate">{loan.lender_name}</div>
-            <div className="text-xs text-slate-400 flex justify-between mt-0.5">
-              <span>{formatINR(loan.loan_amount)}</span>
-              <span>{formatDate(loan.disbursement_date)}</span>
-            </div>
-          </Link>
-        ))}
+        {sortedLoans.map((loan) => {
+          const referral = referralById.get(loan.referral_id);
+          const dotClass = referral ? getReferralColor(referral.color_seq).dot : "bg-slate-500";
+          return (
+            <Link
+              key={loan.id}
+              href={`/loans/${loan.id}`}
+              onClick={onNavigate}
+              className="block rounded-lg bg-slate-800/60 hover:bg-slate-800 px-3 py-2"
+            >
+              <div className="flex items-center gap-1.5 text-sm font-medium text-white truncate">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
+                <span className="truncate">{loan.borrowers?.name ?? "Unknown borrower"}</span>
+              </div>
+              <div className="text-xs text-slate-400 truncate">{loan.lender_name}</div>
+              <div className="text-xs text-slate-400 flex justify-between mt-0.5">
+                <span>{formatINR(loan.loan_amount)}</span>
+                <span>{formatDate(loan.disbursement_date)}</span>
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
-      <div className="px-3 mt-4">
+      <div className="px-3 mt-3">
         <Link
           href="/closed-loans"
           onClick={onNavigate}
-          className="flex items-center justify-between text-sm text-slate-300 hover:text-white px-1 py-2"
+          className="flex items-center justify-between text-sm text-slate-300 hover:text-white px-1 py-1.5"
         >
           <span>Closed loans</span>
           <span className="text-xs bg-slate-800 rounded-full px-2 py-0.5">{closedCount}</span>
         </Link>
       </div>
 
-      <div className="px-3 mt-4 pt-4 border-t border-slate-800 space-y-1.5">
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="w-full text-left text-sm text-slate-300 hover:text-white px-1 py-1.5 disabled:opacity-60"
-        >
-          {exporting ? "Exporting…" : "Export backup"}
-        </button>
-        <button
-          onClick={handleImportClick}
-          disabled={!isAdmin}
-          className={
-            "w-full text-left text-sm px-1 py-1.5 " +
-            (isAdmin ? "text-slate-300 hover:text-white" : "text-slate-600 cursor-not-allowed")
-          }
-        >
-          Import backup
-        </button>
-        <button
-          onClick={handleSwitchUser}
-          className="w-full text-left text-sm text-slate-300 hover:text-white px-1 py-1.5"
-        >
-          Switch user
-        </button>
+      <div className="px-3 mt-2 pt-2 border-t border-slate-800 space-y-1">
+        {isAdmin && (
+          <Link
+            href="/users"
+            onClick={onNavigate}
+            className="block text-sm text-slate-300 hover:text-white px-1 py-1"
+          >
+            Manage users
+          </Link>
+        )}
+        <div className="flex items-center gap-3 px-1 py-1">
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="text-sm text-slate-300 hover:text-white disabled:opacity-60"
+          >
+            {exporting ? "Exporting…" : "Export"}
+          </button>
+          <span className="text-slate-700">/</span>
+          <button
+            onClick={handleImportClick}
+            disabled={!isAdmin}
+            className={isAdmin ? "text-sm text-slate-300 hover:text-white" : "text-sm text-slate-600 cursor-not-allowed"}
+          >
+            Import
+          </button>
+        </div>
       </div>
     </div>
   );
