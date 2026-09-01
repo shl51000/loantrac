@@ -12,18 +12,15 @@ export function formatINR(amount: number | null | undefined): string {
   return inrFormatter.format(amount);
 }
 
-const dateDisplayFormatter = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-});
-
-// "2026-08-09" or a Date -> "09 Aug 2026"
+// "2026-08-09" or a Date -> "09-08-2026"
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date + "T00:00:00") : date;
   if (Number.isNaN(d.getTime())) return "—";
-  return dateDisplayFormatter.format(d);
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
 }
 
 // Convert a Date to "YYYY-MM-DD" for storing/sending to Postgres date columns.

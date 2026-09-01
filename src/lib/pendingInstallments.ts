@@ -28,14 +28,14 @@ export async function getPendingInstallments(
   const ids = installments.map((i) => i.id);
   const { data: receipts } = await supabase
     .from("emi_receipts")
-    .select("installment_id, received_amount")
+    .select("installment_id, received_amount, tds_amount")
     .in("installment_id", ids);
 
   const receivedByInstallment = new Map<string, number>();
   for (const r of receipts ?? []) {
     receivedByInstallment.set(
       r.installment_id,
-      (receivedByInstallment.get(r.installment_id) ?? 0) + Number(r.received_amount)
+      (receivedByInstallment.get(r.installment_id) ?? 0) + Number(r.received_amount) + Number(r.tds_amount)
     );
   }
 
