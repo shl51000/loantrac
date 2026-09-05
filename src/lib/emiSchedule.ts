@@ -8,14 +8,22 @@
 
 import { addDays, toISODateString } from "@/lib/format";
 
-export type EmiInterestMethod = "FLAT_MONTHLY" | "LUMPSUM_ADVANCE" | "PA_DIVIDED_365";
+export type EmiInterestMethod = "FLAT_MONTHLY" | "FLAT_MONTHLY_ADVANCE" | "LUMPSUM_ADVANCE" | "PA_DIVIDED_365";
 export type EmiPrincipalMethod = "MONTHWISE" | "LUMPSUM";
 
 export const INTEREST_METHOD_LABELS: Record<EmiInterestMethod, string> = {
-  FLAT_MONTHLY: "Flat monthly on outstanding",
+  FLAT_MONTHLY: "Flat monthly on outstanding (monthly)",
+  FLAT_MONTHLY_ADVANCE: "Flat monthly on outstanding (in advance)",
   LUMPSUM_ADVANCE: "Lumpsum in advance",
   PA_DIVIDED_365: "Monthly, per-annum ÷ 365 exact days",
 };
+
+// Methods whose full interest is collected as a single upfront row (due the
+// day after disbursement) rather than spread across the schedule — the
+// "Adv." row every EMI screen has to special-case.
+export function isAdvanceInterestMethod(method: EmiInterestMethod | null): boolean {
+  return method === "LUMPSUM_ADVANCE" || method === "FLAT_MONTHLY_ADVANCE";
+}
 
 export const PRINCIPAL_METHOD_LABELS: Record<EmiPrincipalMethod, string> = {
   MONTHWISE: "Month-wise even split",
@@ -107,6 +115,31 @@ export function generateEmiSchedule(params: EmiScheduleParams): GeneratedInstall
       installment_number: 1,
       due_date: toISODateString(addDays(disbursementDate, 1)),
       interest_due: totalInterest,
+      principal_due: 0,
+    };
+    const principalRows: GeneratedInstallment[] = dueDates.map((due, i) => ({
+      installment_number: i + 2,
+      due_date: toISODateString(due),
+      interest_due: 0,
+      principal_due: principalDue[i],
+    }));
+    return [advanceRow, ...principalRows];
+  }
+
+  if (interestMethod === "FLAT_MONTHLY_ADVANCE") {
+    // Same diminishing-balance interest as FLAT_MONTHLY, month by month —
+    // just collected as one upfront sum instead of spread across the
+    // schedule.
+    let outstanding = loanAmount;
+    let totalInterest = 0;
+    for (let i = 0; i < tenureMonths; i++) {
+      totalInterest += round2(outstanding * (interestRate / 100 / 12));
+      outstanding = round2(outstanding - principalDue[i]);
+    }
+    const advanceRow: GeneratedInstallment = {
+      installment_number: 1,
+      due_date: toISODateString(addDays(disbursementDate, 1)),
+      interest_due: round2(totalInterest),
       principal_due: 0,
     };
     const principalRows: GeneratedInstallment[] = dueDates.map((due, i) => ({

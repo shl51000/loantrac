@@ -5,11 +5,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthProvider";
-import { formatDate, formatINR } from "@/lib/format";
+import { formatDate, formatINR, toISODateString } from "@/lib/format";
 import { getReferralColor } from "@/lib/referralColors";
 import { getReminderCount } from "@/lib/reminders";
 import { exportBackup } from "@/lib/exportBackup";
 import { onLoansChanged } from "@/lib/loansRefresh";
+import { getInstallmentStatus } from "@/lib/installmentStatus";
+import { getOncallAccrual } from "@/lib/oncallAccrual";
+import { isAdvanceInterestMethod, type EmiInterestMethod } from "@/lib/emiSchedule";
+import { getErrorMessage } from "@/lib/errors";
 import { IconBarChart, IconPlus, IconCalendar, IconWarning, IconUsers } from "@/components/icons";
 
 const MOBILE_BREAKPOINT = 768;
@@ -35,7 +39,15 @@ interface ActiveLoan {
   loan_amount: number;
   disbursement_date: string;
   referral_id: string;
+  loan_type: "EMI" | "ON_CALL";
+  emi_interest_method: EmiInterestMethod | null;
+  oncall_annual_rate: number | null;
   borrowers: { name: string } | null;
+}
+
+interface EmiProgress {
+  paid: number;
+  total: number;
 }
 
 const NAV_ITEMS = [
@@ -113,6 +125,8 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [activeReferralId, setActiveReferralId] = useState<string | null>(null);
   const [loans, setLoans] = useState<ActiveLoan[]>([]);
+  const [emiProgressByLoan, setEmiProgressByLoan] = useState<Map<string, EmiProgress>>(new Map());
+  const [oncallOutstandingByLoan, setOncallOutstandingByLoan] = useState<Map<string, number>>(new Map());
   const [sort, setSort] = useState<SortOption>("name-asc");
   const [closedCount, setClosedCount] = useState(0);
   const [reminderCount, setReminderCount] = useState(0);
@@ -124,7 +138,9 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         supabase.from("referrals").select("id, name, color_seq").order("color_seq"),
         supabase
           .from("loans")
-          .select("id, lender_name, loan_amount, disbursement_date, referral_id, borrowers(name)")
+          .select(
+            "id, lender_name, loan_amount, disbursement_date, referral_id, loan_type, emi_interest_method, oncall_annual_rate, borrowers(name)"
+          )
           .eq("status", "ACTIVE"),
         supabase
           .from("loans")
@@ -133,8 +149,98 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         getReminderCount(supabase),
       ]);
 
+    const activeLoans = (loanData as unknown as ActiveLoan[]) ?? [];
     setReferrals((referralData as Referral[]) ?? []);
-    setLoans((loanData as unknown as ActiveLoan[]) ?? []);
+    setLoans(activeLoans);
+
+    const emiLoans = activeLoans.filter((l) => l.loan_type === "EMI");
+    if (emiLoans.length > 0) {
+      const emiLoanIds = emiLoans.map((l) => l.id);
+      const { data: instData } = await supabase
+        .from("emi_installments")
+        .select("id, loan_id, installment_number, due_date, interest_due, principal_due")
+        .in("loan_id", emiLoanIds);
+      const instRows =
+        (instData as {
+          id: string;
+          loan_id: string;
+          installment_number: number;
+          due_date: string;
+          interest_due: number;
+          principal_due: number;
+        }[]) ?? [];
+      const instIds = instRows.map((i) => i.id);
+
+      const receiptsByInstallment = new Map<string, { receipt_date: string; received_amount: number; tds_amount: number }[]>();
+      if (instIds.length > 0) {
+        const { data: receiptData } = await supabase
+          .from("emi_receipts")
+          .select("installment_id, receipt_date, received_amount, tds_amount")
+          .in("installment_id", instIds);
+        for (const r of (receiptData as { installment_id: string; receipt_date: string; received_amount: number; tds_amount: number }[]) ?? []) {
+          const list = receiptsByInstallment.get(r.installment_id) ?? [];
+          list.push(r);
+          receiptsByInstallment.set(r.installment_id, list);
+        }
+      }
+
+      const today = toISODateString(new Date());
+      const progress = new Map<string, EmiProgress>();
+      for (const loan of emiLoans) {
+        const isAdvanceRow = (n: number) => isAdvanceInterestMethod(loan.emi_interest_method) && n === 1;
+        // Moratorium months carry nothing due, so they don't count as a step
+        // in the "x paid of y" tally either.
+        const loanInstallments = instRows.filter(
+          (i) =>
+            i.loan_id === loan.id &&
+            !isAdvanceRow(i.installment_number) &&
+            Number(i.interest_due) + Number(i.principal_due) > 0.5
+        );
+        let paid = 0;
+        for (const inst of loanInstallments) {
+          const receipts = receiptsByInstallment.get(inst.id) ?? [];
+          const totalDue = Number(inst.interest_due) + Number(inst.principal_due);
+          const totalReceived = receipts.reduce((s, r) => s + Number(r.received_amount) + Number(r.tds_amount), 0);
+          const lastReceiptDate = receipts.length > 0 ? receipts.map((r) => r.receipt_date).sort().slice(-1)[0] : null;
+          const { status } = getInstallmentStatus(totalDue, totalReceived, lastReceiptDate, inst.due_date, today);
+          if (status === "PAID" || status === "PAID_LATE") paid++;
+        }
+        progress.set(loan.id, { paid, total: loanInstallments.length });
+      }
+      setEmiProgressByLoan(progress);
+    } else {
+      setEmiProgressByLoan(new Map());
+    }
+
+    const oncallLoans = activeLoans.filter((l) => l.loan_type === "ON_CALL");
+    if (oncallLoans.length > 0) {
+      const oncallLoanIds = oncallLoans.map((l) => l.id);
+      const { data: txnData } = await supabase
+        .from("oncall_transactions")
+        .select("loan_id, transaction_type, transaction_date, principal_portion, interest_portion, tds_on_interest")
+        .in("loan_id", oncallLoanIds);
+      const txnRows =
+        (txnData as {
+          loan_id: string;
+          transaction_type: "DRAW" | "REPAYMENT";
+          transaction_date: string;
+          principal_portion: number;
+          interest_portion: number;
+          tds_on_interest: number;
+        }[]) ?? [];
+
+      const today = toISODateString(new Date());
+      const outstanding = new Map<string, number>();
+      for (const loan of oncallLoans) {
+        const loanTxns = txnRows.filter((t) => t.loan_id === loan.id);
+        const accrual = getOncallAccrual(loan, loanTxns, today);
+        outstanding.set(loan.id, accrual.outstandingPrincipal);
+      }
+      setOncallOutstandingByLoan(outstanding);
+    } else {
+      setOncallOutstandingByLoan(new Map());
+    }
+
     setClosedCount(count ?? 0);
     setReminderCount(reminders);
   }, [supabase]);
@@ -173,7 +279,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
     try {
       await exportBackup(supabase);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Export failed");
+      alert(getErrorMessage(err, "Export failed"));
     } finally {
       setExporting(false);
     }
@@ -226,11 +332,11 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
       </nav>
 
       {referrals.length > 0 && (
-        <div className="px-3 mt-3 flex flex-wrap gap-1.5">
+        <div className="px-3 mt-3 flex flex-nowrap gap-1 overflow-x-auto">
           <button
             onClick={() => setActiveReferralId(null)}
             className={
-              "text-xs font-semibold rounded-full px-2.5 py-1 " +
+              "shrink-0 text-xs font-semibold rounded-full px-2 py-1 " +
               (activeReferralId === null
                 ? "bg-white text-slate-900"
                 : "bg-slate-800 text-slate-300 hover:bg-slate-700")
@@ -246,7 +352,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
                 key={r.id}
                 onClick={() => setActiveReferralId(r.id)}
                 className={
-                  "text-xs font-semibold rounded-full px-2.5 py-1 flex items-center gap-1.5 " +
+                  "shrink-0 text-xs font-semibold rounded-full px-2 py-1 flex items-center gap-1 " +
                   (active ? color.tabActiveBg + " " + color.tabActiveText : "bg-slate-800 text-slate-300 hover:bg-slate-700")
                 }
               >
@@ -262,9 +368,10 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         <Link
           href="/active-loans"
           onClick={onNavigate}
-          className="text-xs uppercase tracking-wide text-slate-400 font-semibold hover:text-white"
+          className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-slate-400 font-semibold hover:text-white"
         >
           Active loans
+          <span className="text-xs normal-case bg-slate-800 rounded-full px-2 py-0.5">{loans.length}</span>
         </Link>
         <select
           value={sort}
@@ -299,14 +406,26 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
               onClick={onNavigate}
               className="block rounded-lg bg-slate-800/60 hover:bg-slate-800 px-3 py-2"
             >
-              <div className="flex items-center gap-1.5 text-sm font-medium text-white truncate">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
-                <span className="truncate">{loan.borrowers?.name ?? "Unknown borrower"}</span>
-              </div>
-              <div className="text-xs text-slate-400 truncate">{loan.lender_name}</div>
-              <div className="text-xs text-slate-400 flex justify-between mt-0.5">
-                <span>{formatINR(loan.loan_amount)}</span>
-                <span>{formatDate(loan.disbursement_date)}</span>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-sm font-bold text-white truncate">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
+                    <span className="truncate">{loan.borrowers?.name ?? "Unknown borrower"}</span>
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {formatINR(
+                      loan.loan_type === "ON_CALL" ? oncallOutstandingByLoan.get(loan.id) ?? loan.loan_amount : loan.loan_amount
+                    )}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-xs text-slate-400">
+                    {loan.loan_type === "ON_CALL"
+                      ? "On-call"
+                      : `${emiProgressByLoan.get(loan.id)?.paid ?? 0} / ${emiProgressByLoan.get(loan.id)?.total ?? 0}`}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">{formatDate(loan.disbursement_date)}</div>
+                </div>
               </div>
             </Link>
           );
@@ -326,13 +445,17 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
 
       <div className="px-3 mt-2 pt-2 border-t border-slate-800 space-y-1">
         {isAdmin && (
-          <Link
-            href="/users"
-            onClick={onNavigate}
-            className="block text-sm text-slate-300 hover:text-white px-1 py-1"
-          >
-            Manage users
-          </Link>
+          <div className="flex items-center gap-3 px-1 py-1">
+            <Link href="/users" onClick={onNavigate} className="text-sm text-slate-300 hover:text-white">
+              Users
+            </Link>
+            <Link href="/borrowers/manage" onClick={onNavigate} className="text-sm text-slate-300 hover:text-white">
+              Borrowers
+            </Link>
+            <Link href="/referrals" onClick={onNavigate} className="text-sm text-slate-300 hover:text-white">
+              Referrals
+            </Link>
+          </div>
         )}
         <div className="flex items-center gap-3 px-1 py-1">
           <button

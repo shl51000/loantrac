@@ -20,6 +20,8 @@
 // cash-flow value includes its TDS.
 
 import { calculateXIRR, type CashFlow } from "@/lib/xirr";
+import { getOncallAccrual } from "@/lib/oncallAccrual";
+import { toISODateString } from "@/lib/format";
 
 export type LoanType = "EMI" | "ON_CALL";
 
@@ -98,19 +100,23 @@ export function getActualXirr(
       }
     }
   } else {
-    let outstanding = Number(loan.loan_amount);
     for (const t of transactions) {
       if (t.transaction_type === "DRAW") {
         flows.push({ date: new Date(t.transaction_date), amount: -Number(t.amount) });
-        outstanding += Number(t.amount);
       } else {
         const value = Number(t.principal_portion) + Number(t.interest_portion) + Number(t.tds_on_interest);
         flows.push({ date: new Date(t.transaction_date), amount: value });
-        outstanding -= Number(t.principal_portion);
       }
     }
-    if (!isClosed && outstanding > 0.5) {
-      flows.push({ date: today, amount: outstanding });
+    if (!isClosed) {
+      // Assumes both the outstanding principal AND every rupee of interest
+      // accrued (at the contracted rate, day-count) but not yet paid are
+      // collected today — not just the principal.
+      const accrual = getOncallAccrual(loan, transactions, toISODateString(today));
+      const dueToday = round2(accrual.outstandingPrincipal + accrual.unpaidAccruedInterest);
+      if (dueToday > 0.5) {
+        flows.push({ date: today, amount: dueToday });
+      }
     }
   }
 

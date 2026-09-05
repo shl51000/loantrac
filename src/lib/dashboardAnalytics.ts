@@ -11,7 +11,8 @@ import { getPlannedXirr, getActualXirr, type XirrLoan, type XirrInstallment } fr
 import type { EmiInterestMethod } from "@/lib/emiSchedule";
 
 const SHORT_INTEREST_LABELS: Record<EmiInterestMethod, string> = {
-  FLAT_MONTHLY: "Monthly, flat rate",
+  FLAT_MONTHLY: "Flat monthly (monthly)",
+  FLAT_MONTHLY_ADVANCE: "Flat monthly (advance)",
   LUMPSUM_ADVANCE: "Lumpsum in advance",
   PA_DIVIDED_365: "Monthly, p.a./365",
 };
@@ -47,12 +48,23 @@ interface RawReceipt {
   tds_amount: number;
 }
 
+interface RawTransaction {
+  loan_id: string;
+  transaction_type: "DRAW" | "REPAYMENT";
+  transaction_date: string;
+  amount: number;
+  principal_portion: number;
+  interest_portion: number;
+  tds_on_interest: number;
+}
+
 interface LoanAnalytics {
   loanId: string;
   referralId: string;
   lenderName: string;
   borrowerName: string;
   loanAmount: number;
+  capitalDeployed: number;
   loanType: "EMI" | "ON_CALL";
   interestMethod: EmiInterestMethod | null;
   hasMoratorium: boolean;
@@ -146,8 +158,22 @@ export async function getDashboardAnalytics(
   }
 
   const emiLoanIds = loans.filter((l) => l.loan_type === "EMI").map((l) => l.id);
+  const oncallLoanIds = loans.filter((l) => l.loan_type === "ON_CALL").map((l) => l.id);
   const installmentsByLoan = new Map<string, RawInstallment[]>();
   const receiptsByInstallment = new Map<string, RawReceipt[]>();
+  const transactionsByLoan = new Map<string, RawTransaction[]>();
+
+  if (oncallLoanIds.length > 0) {
+    const { data: txnData } = await supabase
+      .from("oncall_transactions")
+      .select("loan_id, transaction_type, transaction_date, amount, principal_portion, interest_portion, tds_on_interest")
+      .in("loan_id", oncallLoanIds);
+    for (const t of (txnData as RawTransaction[]) ?? []) {
+      const list = transactionsByLoan.get(t.loan_id) ?? [];
+      list.push(t);
+      transactionsByLoan.set(t.loan_id, list);
+    }
+  }
 
   if (emiLoanIds.length > 0) {
     const { data: instData } = await supabase
@@ -190,7 +216,7 @@ export async function getDashboardAnalytics(
       const totalReceived = receipts.reduce((s, r) => s + Number(r.received_amount) + Number(r.tds_amount), 0);
       const lastReceiptDate = receipts.length > 0 ? receipts.map((r) => r.receipt_date).sort().slice(-1)[0] : null;
 
-      if (inst.due_date <= todayStr) {
+      if (inst.due_date <= todayStr && totalDue > 0.5) {
         dueCount++;
         const { status } = getInstallmentStatus(totalDue, totalReceived, lastReceiptDate, inst.due_date, todayStr);
         if (status !== "PAID" && status !== "PENDING") lateCount++;
@@ -226,8 +252,12 @@ export async function getDashboardAnalytics(
       closure_settlement_amount: loan.closure_settlement_amount,
       oncall_annual_rate: loan.oncall_annual_rate,
     };
+    const oncallTransactions = transactionsByLoan.get(loan.id) ?? [];
     const planned = getPlannedXirr(xirrLoan, xirrInstallments);
-    const actual = getActualXirr(xirrLoan, xirrInstallments, [], today);
+    const actual = getActualXirr(xirrLoan, xirrInstallments, oncallTransactions, today);
+    const totalDraws = oncallTransactions
+      .filter((t) => t.transaction_type === "DRAW")
+      .reduce((s, t) => s + Number(t.amount), 0);
 
     return {
       loanId: loan.id,
@@ -235,6 +265,7 @@ export async function getDashboardAnalytics(
       lenderName: loan.lender_name,
       borrowerName: loan.borrowers?.name ?? "Unknown",
       loanAmount: Number(loan.loan_amount),
+      capitalDeployed: Number(loan.loan_amount) + totalDraws,
       loanType: loan.loan_type,
       interestMethod: loan.emi_interest_method,
       hasMoratorium: (loan.emi_moratorium_months ?? 0) > 0,
@@ -263,7 +294,7 @@ export async function getDashboardAnalytics(
       return {
         referralId,
         loanCount: group.length,
-        capital: group.reduce((s, g) => s + g.loanAmount, 0),
+        capital: group.reduce((s, g) => s + g.capitalDeployed, 0),
         lateRatePct: dueCount > 0 ? (lateCount / dueCount) * 100 : null,
         shortfalls,
         avgDelayDays: average(delays),
@@ -276,9 +307,9 @@ export async function getDashboardAnalytics(
   // ---- Concentration: top borrowers ----
   const byBorrower = new Map<string, number>();
   for (const la of loanAnalytics) {
-    byBorrower.set(la.borrowerName, (byBorrower.get(la.borrowerName) ?? 0) + la.loanAmount);
+    byBorrower.set(la.borrowerName, (byBorrower.get(la.borrowerName) ?? 0) + la.capitalDeployed);
   }
-  const totalCapital = loanAnalytics.reduce((s, l) => s + l.loanAmount, 0);
+  const totalCapital = loanAnalytics.reduce((s, l) => s + l.capitalDeployed, 0);
   const topBorrowers: ConcentrationRow[] = Array.from(byBorrower.entries())
     .map(([label, amount]) => ({ label, amount, percent: totalCapital > 0 ? (amount / totalCapital) * 100 : 0 }))
     .sort((a, b) => b.amount - a.amount)
@@ -287,7 +318,7 @@ export async function getDashboardAnalytics(
   // ---- Concentration: capital by lender ----
   const byLender = new Map<string, number>();
   for (const la of loanAnalytics) {
-    byLender.set(la.lenderName, (byLender.get(la.lenderName) ?? 0) + la.loanAmount);
+    byLender.set(la.lenderName, (byLender.get(la.lenderName) ?? 0) + la.capitalDeployed);
   }
   const capitalByLender: ConcentrationRow[] = Array.from(byLender.entries())
     .map(([label, amount]) => ({ label, amount, percent: totalCapital > 0 ? (amount / totalCapital) * 100 : 0 }))

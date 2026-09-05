@@ -12,6 +12,22 @@ export function formatINR(amount: number | null | undefined): string {
   return inrFormatter.format(amount);
 }
 
+const amountGroupFormatter = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
+
+// Live-formats an amount input's raw text into Indian digit grouping as the
+// user types, e.g. "2000000" -> "20,00,000". Whole rupees only (no decimals).
+export function formatAmountInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  return amountGroupFormatter.format(Number(digits));
+}
+
+// Strips the grouping commas back out so a formatted amount input's text can
+// be parsed as a number.
+export function parseAmountInput(text: string): number {
+  return parseFloat(text.replace(/,/g, ""));
+}
+
 // "2026-08-09" or a Date -> "09-08-2026"
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "—";

@@ -1,7 +1,7 @@
 // Computes an EMI installment's collection status from what's actually been
 // received against it so far.
 
-export type InstallmentStatus = "PENDING" | "OVERDUE" | "PARTIAL" | "SHORT" | "PAID" | "PAID_LATE";
+export type InstallmentStatus = "NONE_DUE" | "PENDING" | "OVERDUE" | "PARTIAL" | "SHORT" | "PAID" | "PAID_LATE";
 
 export interface InstallmentStatusResult {
   status: InstallmentStatus;
@@ -10,6 +10,7 @@ export interface InstallmentStatusResult {
 }
 
 const LABELS: Record<InstallmentStatus, string> = {
+  NONE_DUE: "—",
   PENDING: "Pending",
   OVERDUE: "Overdue",
   PARTIAL: "Partial",
@@ -19,6 +20,7 @@ const LABELS: Record<InstallmentStatus, string> = {
 };
 
 const TONES: Record<InstallmentStatus, string> = {
+  NONE_DUE: "text-slate-500 bg-slate-100",
   PENDING: "text-slate-600 bg-slate-100",
   OVERDUE: "text-rose-700 bg-rose-100",
   PARTIAL: "text-amber-700 bg-amber-100",
@@ -49,7 +51,11 @@ export function getInstallmentStatus(
   const isPastDue = dueDate < today;
   let status: InstallmentStatus;
 
-  if (totalReceived <= 0) {
+  if (totalDue <= ROUNDING_TOLERANCE && totalReceived <= 0) {
+    // Nothing was ever due here (e.g. a moratorium month) — not overdue,
+    // not pending, just not applicable.
+    status = "NONE_DUE";
+  } else if (totalReceived <= 0) {
     status = isPastDue ? "OVERDUE" : "PENDING";
   } else if (totalReceived < totalDue - ROUNDING_TOLERANCE) {
     status = isPastDue ? "SHORT" : "PARTIAL";

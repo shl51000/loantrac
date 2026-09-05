@@ -68,48 +68,42 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-teal-700">LoanTrac</h1>
-          <p className="text-slate-500 mt-1 text-sm">Sign in to your portfolio</p>
+        <div className="flex flex-col items-center text-center mb-8">
+          <div className="w-16 h-16 border-2 border-slate-300 flex items-center justify-center mb-4">
+            <span className="text-2xl font-serif font-bold text-teal-400">SF</span>
+          </div>
+          <h1 className="text-xl font-bold text-white">LoanTrac</h1>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-5"
-        >
-          <div>
-            <span className="block text-sm font-medium text-slate-700 mb-2">
-              I am
-            </span>
-            <div className="grid grid-cols-2 gap-2">
-              {(["user", "admin"] as Role[]).map((role) => {
-                const active = selectedRole === role;
-                return (
-                  <button
-                    key={role}
-                    type="button"
-                    onClick={() => {
-                      setSelectedRole(role);
-                      setError(null);
-                    }}
-                    className={
-                      "rounded-lg py-2.5 text-sm font-semibold border transition-colors " +
-                      (active
-                        ? "bg-teal-600 text-white border-teal-600"
-                        : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50")
-                    }
-                  >
-                    {ROLE_LABEL[role]}
-                  </button>
-                );
-              })}
-            </div>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {(["user", "admin"] as Role[]).map((role) => {
+              const active = selectedRole === role;
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole(role);
+                    setError(null);
+                  }}
+                  className={
+                    "rounded-lg py-2.5 text-sm font-semibold border transition-colors " +
+                    (active
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : "bg-slate-800/60 text-slate-200 border-slate-600 hover:bg-slate-800")
+                  }
+                >
+                  {ROLE_LABEL[role]}
+                </button>
+              );
+            })}
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
+            <label htmlFor="email" className="sr-only">
               Email
             </label>
             <input
@@ -119,13 +113,13 @@ export default function LoginPage() {
               autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-              placeholder="you@example.com"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              placeholder="Email"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+            <label htmlFor="password" className="sr-only">
               Passphrase
             </label>
             <input
@@ -135,13 +129,13 @@ export default function LoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
               placeholder={`${roleLabel} passphrase`}
             />
           </div>
 
           {error && (
-            <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+            <p className="text-sm text-rose-300 bg-rose-950/40 border border-rose-800 rounded-lg px-3 py-2">
               {error}
             </p>
           )}

@@ -116,7 +116,7 @@ create table if not exists public.loans (
   routing_account_name text,
 
   -- EMI-only fields (null for On-Call loans)
-  emi_interest_method text check (emi_interest_method in ('FLAT_MONTHLY','LUMPSUM_ADVANCE','PA_DIVIDED_365')),
+  emi_interest_method text check (emi_interest_method in ('FLAT_MONTHLY','FLAT_MONTHLY_ADVANCE','LUMPSUM_ADVANCE','PA_DIVIDED_365')),
   emi_principal_method text check (emi_principal_method in ('MONTHWISE','LUMPSUM')),
   emi_interest_rate numeric,
   emi_tenure_months int,

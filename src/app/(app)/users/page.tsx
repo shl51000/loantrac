@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthProvider";
 import { formatDate } from "@/lib/format";
+import { getErrorMessage } from "@/lib/errors";
 
 type Role = "admin" | "user";
 
@@ -61,23 +62,27 @@ export default function UsersPage() {
       return;
     }
     setAddSubmitting(true);
-    const res = await fetch("/api/admin/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: newEmail.trim(), password: newPassword, role: newRole }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      setAddError(json.error ?? "Could not create user.");
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: newEmail.trim(), password: newPassword, role: newRole }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setAddError(json?.error ?? `Could not create user (${res.status}).`);
+        return;
+      }
+      setAddingUser(false);
+      setNewEmail("");
+      setNewPassword("");
+      setNewRole("user");
+      await loadProfiles();
+    } catch (err) {
+      setAddError(getErrorMessage(err, "Could not reach the server."));
+    } finally {
       setAddSubmitting(false);
-      return;
     }
-    setAddingUser(false);
-    setNewEmail("");
-    setNewPassword("");
-    setNewRole("user");
-    setAddSubmitting(false);
-    await loadProfiles();
   }
 
   async function handleRoleChange(id: string, role: Role) {
@@ -106,20 +111,24 @@ export default function UsersPage() {
       return;
     }
     setEditSubmitting(true);
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      setEditError(json.error ?? "Could not update user.");
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setEditError(json?.error ?? `Could not update user (${res.status}).`);
+        return;
+      }
+      setEditingId(null);
+      await loadProfiles();
+    } catch (err) {
+      setEditError(getErrorMessage(err, "Could not reach the server."));
+    } finally {
       setEditSubmitting(false);
-      return;
     }
-    setEditingId(null);
-    setEditSubmitting(false);
-    await loadProfiles();
   }
 
   async function handleDelete(id: string, email: string) {
@@ -136,7 +145,7 @@ export default function UsersPage() {
   if (!isAdmin) {
     return (
       <div>
-        <h1 className="text-3xl font-bold text-teal-700">Manage users</h1>
+        <h1 className="text-3xl font-bold text-teal-700 uppercase tracking-wide">Manage users</h1>
         <p className="text-sm text-slate-500 mt-4">This screen is only available to Admins.</p>
       </div>
     );
@@ -147,7 +156,7 @@ export default function UsersPage() {
   return (
     <div className="max-w-3xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-teal-700">Manage users</h1>
+        <h1 className="text-3xl font-bold text-teal-700 uppercase tracking-wide">Manage users</h1>
         {!addingUser && (
           <button
             onClick={() => setAddingUser(true)}
@@ -160,7 +169,7 @@ export default function UsersPage() {
 
       {addingUser && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 mt-4 space-y-3">
-          <h3 className="text-sm font-semibold text-slate-700">New login</h3>
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">New login</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelClass}>Email</label>

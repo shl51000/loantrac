@@ -15,7 +15,6 @@ export async function getPortfolioStats(supabase: SupabaseClient): Promise<Portf
     .eq("status", "ACTIVE");
 
   const activeLoans = loansData ?? [];
-  const activeCapitalDeployed = activeLoans.reduce((s, l) => s + Number(l.loan_amount), 0);
 
   const emiLoanIds = activeLoans.filter((l) => l.loan_type === "EMI").map((l) => l.id);
   const oncallLoanIds = activeLoans.filter((l) => l.loan_type === "ON_CALL").map((l) => l.id);
@@ -30,32 +29,43 @@ export async function getPortfolioStats(supabase: SupabaseClient): Promise<Portf
     if (instIds.length > 0) {
       const { data: receipts } = await supabase
         .from("emi_receipts")
-        .select("received_amount, installment_id")
+        .select("received_amount, tds_amount, installment_id")
         .eq("receipt_type", "PRINCIPAL")
         .in("installment_id", instIds);
-      emiPrincipalReceived = (receipts ?? []).reduce((s, r) => s + Number(r.received_amount), 0);
+      emiPrincipalReceived = (receipts ?? []).reduce((s, r) => s + Number(r.received_amount) + Number(r.tds_amount), 0);
     }
   }
 
-  let oncallNetDraws = 0;
   let oncallPrincipalRepaid = 0;
+  const drawsByLoan = new Map<string, number>();
   if (oncallLoanIds.length > 0) {
     const { data: txns } = await supabase
       .from("oncall_transactions")
       .select("transaction_type, amount, principal_portion, loan_id")
       .in("loan_id", oncallLoanIds);
     for (const t of txns ?? []) {
-      if (t.transaction_type === "DRAW") oncallNetDraws += Number(t.amount);
+      if (t.transaction_type === "DRAW") {
+        drawsByLoan.set(t.loan_id, (drawsByLoan.get(t.loan_id) ?? 0) + Number(t.amount));
+      }
       if (t.transaction_type === "REPAYMENT") oncallPrincipalRepaid += Number(t.principal_portion);
     }
   }
 
-  const outstandingPrincipal =
-    activeCapitalDeployed + oncallNetDraws - oncallPrincipalRepaid - emiPrincipalReceived;
+  // Deployed = every rupee of principal ever put out on active loans,
+  // including On-Call top-up draws (not just each loan's initial amount) —
+  // outstanding is always this minus what's since been repaid.
+  const activeCapitalDeployed = activeLoans.reduce(
+    (s, l) => s + Number(l.loan_amount) + (drawsByLoan.get(l.id) ?? 0),
+    0
+  );
+  const outstandingPrincipal = activeCapitalDeployed - oncallPrincipalRepaid - emiPrincipalReceived;
 
   const capitalMap = new Map<string, number>();
   for (const l of activeLoans) {
-    capitalMap.set(l.referral_id, (capitalMap.get(l.referral_id) ?? 0) + Number(l.loan_amount));
+    capitalMap.set(
+      l.referral_id,
+      (capitalMap.get(l.referral_id) ?? 0) + Number(l.loan_amount) + (drawsByLoan.get(l.id) ?? 0)
+    );
   }
   const capitalByReferral = Array.from(capitalMap.entries()).map(([referralId, amount]) => ({
     referralId,
