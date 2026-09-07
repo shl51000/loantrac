@@ -14,10 +14,13 @@ import {
 } from "@/lib/format";
 import { getReferralColor } from "@/lib/referralColors";
 import { getPendingInstallments, type PendingInstallment } from "@/lib/pendingInstallments";
+import { getEmiProgressByLoan, type EmiProgress } from "@/lib/emiProgress";
 
 interface LoanInfo {
   id: string;
   lender_name: string;
+  co_lender_1: string | null;
+  co_lender_2: string | null;
   borrowers: { name: string; whatsapp_number: string } | null;
   referrals: { name: string; whatsapp_number: string; color_seq: number } | null;
 }
@@ -29,6 +32,9 @@ interface ReminderRow extends PendingInstallment {
   referralWhatsapp: string | null;
   referralColorSeq: number | null;
   lenderName: string;
+  coLender1: string | null;
+  coLender2: string | null;
+  emiProgress: EmiProgress | null;
 }
 
 interface MonthGroupData {
@@ -74,10 +80,15 @@ export default function RemindersPage() {
       return;
     }
     const loanIds = [...new Set(pending.map((p) => p.loanId))];
-    const { data: loanData } = await supabase
-      .from("loans")
-      .select("id, lender_name, borrowers(name, whatsapp_number), referrals(name, whatsapp_number, color_seq)")
-      .in("id", loanIds);
+    const [{ data: loanData }, emiProgressByLoan] = await Promise.all([
+      supabase
+        .from("loans")
+        .select(
+          "id, lender_name, co_lender_1, co_lender_2, borrowers(name, whatsapp_number), referrals(name, whatsapp_number, color_seq)"
+        )
+        .in("id", loanIds),
+      getEmiProgressByLoan(supabase),
+    ]);
 
     const loanById = new Map((loanData as unknown as LoanInfo[]).map((l) => [l.id, l]));
     const merged: ReminderRow[] = pending.map((p) => {
@@ -90,6 +101,9 @@ export default function RemindersPage() {
         referralWhatsapp: loan?.referrals?.whatsapp_number ?? null,
         referralColorSeq: loan?.referrals?.color_seq ?? null,
         lenderName: loan?.lender_name ?? "—",
+        coLender1: loan?.co_lender_1 ?? null,
+        coLender2: loan?.co_lender_2 ?? null,
+        emiProgress: emiProgressByLoan.get(p.loanId) ?? null,
       };
     });
     merged.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
@@ -329,9 +343,17 @@ function ReminderCard({
         <Link href={`/loans/${r.loanId}`} className="block hover:opacity-80">
           <span className="font-semibold text-slate-800 hover:underline">{r.borrowerName}</span>
           <span className="text-slate-400 text-sm"> · {r.lenderName}</span>
+          {(r.coLender1 || r.coLender2) && (
+            <span className="text-slate-400 text-sm"> · {[r.coLender1, r.coLender2].filter(Boolean).join(", ")}</span>
+          )}
           {referralColor && r.referralName && (
             <span className={`ml-2 text-xs font-semibold rounded-full px-2 py-0.5 ${referralColor.badgeBg} ${referralColor.badgeText}`}>
               {r.referralName}
+            </span>
+          )}
+          {r.emiProgress && (
+            <span className="ml-2 text-xs text-slate-400">
+              EMI {r.emiProgress.paid}/{r.emiProgress.total}
             </span>
           )}
           <div className="text-sm text-slate-500 mt-0.5">
@@ -350,7 +372,7 @@ function ReminderCard({
             href={waLink(r.borrowerWhatsapp, borrowerMessage(r.borrowerName, amountStr, dueDateStr, isOverdue))}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs font-semibold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 px-3 py-1.5"
+            className="text-xs font-semibold rounded-lg border border-blue-800 text-blue-800 hover:bg-blue-50 px-3 py-1.5"
           >
             WhatsApp borrower
           </a>
@@ -359,9 +381,10 @@ function ReminderCard({
               href={waLink(r.referralWhatsapp, referralMessage(r.borrowerName, amountStr, dueDateStr, isOverdue))}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs font-semibold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 px-3 py-1.5"
+              className={`text-xs font-semibold rounded-lg border px-3 py-1.5 hover:opacity-80 ${referralColor ? `${referralColor.badgeBg} ${referralColor.badgeText}` : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+              style={referralColor ? { borderColor: referralColor.chart } : undefined}
             >
-              WhatsApp referral
+              WhatsApp {r.referralName}
             </a>
           )}
         </div>

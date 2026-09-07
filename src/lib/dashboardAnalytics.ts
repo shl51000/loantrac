@@ -91,6 +91,7 @@ export interface ConcentrationRow {
   label: string;
   amount: number;
   percent: number;
+  referralId?: string;
 }
 
 export interface GroupStatsRow {
@@ -102,6 +103,7 @@ export interface GroupStatsRow {
 
 export interface YieldLeakageRow {
   loanId: string;
+  referralId: string;
   borrowerName: string;
   lateCount: number;
   shortCount: number;
@@ -306,12 +308,24 @@ export async function getDashboardAnalytics(
 
   // ---- Concentration: top borrowers ----
   const byBorrower = new Map<string, number>();
+  // Track each borrower's single largest loan, to attribute a referral color
+  // to a borrower who has loans from more than one referral.
+  const largestLoanByBorrower = new Map<string, { amount: number; referralId: string }>();
   for (const la of loanAnalytics) {
     byBorrower.set(la.borrowerName, (byBorrower.get(la.borrowerName) ?? 0) + la.capitalDeployed);
+    const largest = largestLoanByBorrower.get(la.borrowerName);
+    if (!largest || la.capitalDeployed > largest.amount) {
+      largestLoanByBorrower.set(la.borrowerName, { amount: la.capitalDeployed, referralId: la.referralId });
+    }
   }
   const totalCapital = loanAnalytics.reduce((s, l) => s + l.capitalDeployed, 0);
   const topBorrowers: ConcentrationRow[] = Array.from(byBorrower.entries())
-    .map(([label, amount]) => ({ label, amount, percent: totalCapital > 0 ? (amount / totalCapital) * 100 : 0 }))
+    .map(([label, amount]) => ({
+      label,
+      amount,
+      percent: totalCapital > 0 ? (amount / totalCapital) * 100 : 0,
+      referralId: largestLoanByBorrower.get(label)?.referralId,
+    }))
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
 
@@ -363,6 +377,7 @@ export async function getDashboardAnalytics(
     .filter((l) => l.planned !== null && l.actual !== null)
     .map((l) => ({
       loanId: l.loanId,
+      referralId: l.referralId,
       borrowerName: l.borrowerName,
       lateCount: l.lateCount,
       shortCount: l.shortCount,

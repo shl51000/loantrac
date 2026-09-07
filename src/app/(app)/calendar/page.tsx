@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { addDays, formatDate, formatINR, toISODateString } from "@/lib/format";
 import { getInstallmentStatus } from "@/lib/installmentStatus";
+import { getReferralColor } from "@/lib/referralColors";
 
 interface RawInstallment {
   id: string;
@@ -12,7 +13,13 @@ interface RawInstallment {
   due_date: string;
   interest_due: number;
   principal_due: number;
-  loans: { lender_name: string; borrowers: { name: string } | null } | null;
+  loans: {
+    lender_name: string;
+    co_lender_1: string | null;
+    co_lender_2: string | null;
+    borrowers: { name: string } | null;
+    referrals: { name: string; color_seq: number } | null;
+  } | null;
 }
 
 interface CalendarInstallment {
@@ -24,6 +31,10 @@ interface CalendarInstallment {
   lastReceiptDate: string | null;
   borrowerName: string;
   lenderName: string;
+  coLender1: string | null;
+  coLender2: string | null;
+  referralName: string | null;
+  referralColorSeq: number | null;
 }
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -55,7 +66,9 @@ export default function CalendarPage() {
     async function load() {
       const { data: raw } = await supabase
         .from("emi_installments")
-        .select("id, loan_id, due_date, interest_due, principal_due, loans!inner(status, lender_name, borrowers(name))")
+        .select(
+          "id, loan_id, due_date, interest_due, principal_due, loans!inner(status, lender_name, co_lender_1, co_lender_2, borrowers(name), referrals(name, color_seq))"
+        )
         .eq("loans.status", "ACTIVE");
 
       const rows = (raw as unknown as RawInstallment[]) ?? [];
@@ -91,6 +104,10 @@ export default function CalendarPage() {
           lastReceiptDate: lastReceiptDateByInstallment.get(r.id) ?? null,
           borrowerName: r.loans?.borrowers?.name ?? "Unknown",
           lenderName: r.loans?.lender_name ?? "—",
+          coLender1: r.loans?.co_lender_1 ?? null,
+          coLender2: r.loans?.co_lender_2 ?? null,
+          referralName: r.loans?.referrals?.name ?? null,
+          referralColorSeq: r.loans?.referrals?.color_seq ?? null,
         }))
       );
       setLoading(false);
@@ -100,6 +117,20 @@ export default function CalendarPage() {
       mounted = false;
     };
   }, [supabase]);
+
+  // installments holds every installment (paid and pending) for every
+  // active EMI loan, so loan-level paid/total counts can be derived here
+  // without another round trip to the database.
+  const emiProgressByLoan = useMemo(() => {
+    const map = new Map<string, { paid: number; total: number }>();
+    for (const inst of installments) {
+      const entry = map.get(inst.loanId) ?? { paid: 0, total: 0 };
+      entry.total += 1;
+      if (inst.totalDue - inst.received <= 0.5) entry.paid += 1;
+      map.set(inst.loanId, entry);
+    }
+    return map;
+  }, [installments]);
 
   const borrowerOptions = useMemo(
     () => Array.from(new Set(installments.map((i) => i.borrowerName))).sort(),
@@ -309,7 +340,7 @@ export default function CalendarPage() {
                 >
                   <div>
                     <span className="font-medium text-teal-700">{r.borrowerName}</span>
-                    <span className="text-slate-400 text-sm"> · {r.lenderName}</span>
+                    <InstallmentMeta r={r} progress={emiProgressByLoan.get(r.loanId)} />
                     <div className="text-sm text-slate-500">{formatINR(r.totalDue)}</div>
                   </div>
                   <span className={`text-xs font-semibold rounded-full px-2 py-1 ${toneClass}`}>{label}</span>
@@ -339,7 +370,7 @@ export default function CalendarPage() {
                 >
                   <div>
                     <span className="font-medium text-teal-700">{r.borrowerName}</span>
-                    <span className="text-slate-400 text-sm"> · {r.lenderName}</span>
+                    <InstallmentMeta r={r} progress={emiProgressByLoan.get(r.loanId)} />
                     <div className="text-sm text-slate-500">
                       {formatINR(remaining)} due {formatDate(r.dueDate)}
                     </div>
@@ -352,6 +383,33 @@ export default function CalendarPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function InstallmentMeta({
+  r,
+  progress,
+}: {
+  r: CalendarInstallment;
+  progress?: { paid: number; total: number };
+}) {
+  const referralColor = r.referralColorSeq ? getReferralColor(r.referralColorSeq) : null;
+  const coLenders = [r.coLender1, r.coLender2].filter(Boolean).join(", ");
+  return (
+    <>
+      <span className="text-slate-400 text-sm"> · {r.lenderName}</span>
+      {coLenders && <span className="text-slate-400 text-sm"> · {coLenders}</span>}
+      {r.referralName && referralColor && (
+        <span className={`ml-2 text-xs font-semibold rounded-full px-2 py-0.5 ${referralColor.badgeBg} ${referralColor.badgeText}`}>
+          {r.referralName}
+        </span>
+      )}
+      {progress && (
+        <span className="text-xs text-slate-400 ml-2">
+          EMI {progress.paid}/{progress.total}
+        </span>
+      )}
+    </>
   );
 }
 

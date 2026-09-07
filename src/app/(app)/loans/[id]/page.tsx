@@ -1338,7 +1338,7 @@ export default function LoanDetailPage() {
                   icon={<IconTrendingUp className="w-4 h-4" />}
                 />
                 <StatTile
-                  label={loan.status === "CLOSED" ? "Actual XIRR (at closure)" : "Actual XIRR (projected)"}
+                  label="Actual XIRR"
                   value={formatPercent(actualXirr)}
                   sub={xirrComparison === "BEHIND" ? "Behind plan" : xirrComparison === "AHEAD" ? "Ahead of plan" : "On track"}
                   valueClass={actualXirrTone}
@@ -1438,7 +1438,7 @@ export default function LoanDetailPage() {
             <InfoRow label="Lender" value={loan.lender_name} />
             {loan.co_lender_1 && <InfoRow label="Co-lender 1" value={loan.co_lender_1} />}
             {loan.co_lender_2 && <InfoRow label="Co-lender 2" value={loan.co_lender_2} />}
-            <InfoRow label="Referral" value={loan.referrals?.name ?? "—"} />
+            <InfoRow label="Referral" value={loan.referrals?.name ?? "—"} valueColor={referralColor?.chart} />
             <InfoRow label="Disbursement date" value={formatDate(loan.disbursement_date)} />
             <InfoRow
               label={loan.loan_type === "ON_CALL" ? "Loan amount (incl. top-ups)" : "Loan amount"}
@@ -1880,7 +1880,7 @@ export default function LoanDetailPage() {
               icon={<IconTrendingUp className="w-4 h-4" />}
             />
             <StatTile
-              label={loan.status === "CLOSED" ? "Actual XIRR (at closure)" : "Actual XIRR (projected)"}
+              label="Actual XIRR"
               value={formatPercent(actualXirr)}
               sub={xirrComparison === "BEHIND" ? "Behind plan" : xirrComparison === "AHEAD" ? "Ahead of plan" : "On track"}
               valueClass={actualXirrTone}
@@ -2132,11 +2132,13 @@ export default function LoanDetailPage() {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
     <div>
       <div className="text-xs text-slate-400">{label}</div>
-      <div className="text-slate-800 font-medium">{value}</div>
+      <div className={`font-medium ${valueColor ? "" : "text-slate-800"}`} style={valueColor ? { color: valueColor } : undefined}>
+        {value}
+      </div>
     </div>
   );
 }

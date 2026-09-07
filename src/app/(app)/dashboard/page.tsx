@@ -49,33 +49,21 @@ export default function DashboardPage() {
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [xirrResults, setXirrResults] = useState<LoanXirrResult[]>([]);
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
-  const [closedCount, setClosedCount] = useState(0);
-  const [totalReturned, setTotalReturned] = useState(0);
 
   useEffect(() => {
     (async () => {
-      const [portfolioStats, pending, { data: referralData }, xirr, dashAnalytics, { count: closed }, { data: closedLoans }] =
-        await Promise.all([
-          getPortfolioStats(supabase),
-          getPendingInstallments(supabase),
-          supabase.from("referrals").select("id, name, color_seq").order("color_seq"),
-          getAllLoanXirrResults(supabase),
-          getDashboardAnalytics(supabase),
-          supabase.from("loans").select("id", { count: "exact", head: true }).eq("status", "CLOSED"),
-          supabase.from("loans").select("closure_settlement_amount").eq("status", "CLOSED"),
-        ]);
+      const [portfolioStats, pending, { data: referralData }, xirr, dashAnalytics] = await Promise.all([
+        getPortfolioStats(supabase),
+        getPendingInstallments(supabase),
+        supabase.from("referrals").select("id, name, color_seq").order("color_seq"),
+        getAllLoanXirrResults(supabase),
+        getDashboardAnalytics(supabase),
+      ]);
       setStats(portfolioStats);
       setBuckets(bucketPendingAmounts(pending));
       setReferrals((referralData as Referral[]) ?? []);
       setXirrResults(xirr);
       setAnalytics(dashAnalytics);
-      setClosedCount(closed ?? 0);
-      setTotalReturned(
-        ((closedLoans as { closure_settlement_amount: number }[]) ?? []).reduce(
-          (s, l) => s + Number(l.closure_settlement_amount),
-          0
-        )
-      );
       setLoading(false);
     })();
   }, [supabase]);
@@ -118,9 +106,12 @@ export default function DashboardPage() {
         name: ref.name,
         Planned: planned !== null ? Number((planned * 100).toFixed(2)) : null,
         Actual: actual !== null ? Number((actual * 100).toFixed(2)) : null,
+        actualColor: getReferralColor(ref.color_seq).chart,
       };
     })
-    .filter((x): x is { name: string; Planned: number | null; Actual: number | null } => x !== null);
+    .filter(
+      (x): x is { name: string; Planned: number | null; Actual: number | null; actualColor: string } => x !== null
+    );
 
   const maxBorrowerPercent = Math.max(1, ...(analytics?.topBorrowers.map((b) => b.percent) ?? [1]));
   const maxLenderPercent = Math.max(1, ...(analytics?.capitalByLender.map((b) => b.percent) ?? [1]));
@@ -129,9 +120,6 @@ export default function DashboardPage() {
     <div>
 
       <h1 className="text-3xl font-bold text-teal-700 underline decoration-2 underline-offset-4 uppercase tracking-wide">Dashboard</h1>
-      <p className="text-sm text-slate-500 mt-1">
-        Rolled up across {stats?.activeLoanCount ?? 0} active loans ({closedCount} closed, {formatINR(totalReturned)} returned).
-      </p>
 
       {/* Top 4 headline stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
@@ -143,14 +131,14 @@ export default function DashboardPage() {
         />
         <BigStat label="Outstanding principal" value={formatINR(stats?.outstandingPrincipal)} loading={loading} />
         <BigStat
-          label="Portfolio planned XIRR"
+          label="Planned XIRR"
           value={formatPercent(portfolioPlannedXirr)}
           note="capital-weighted"
           icon={<IconTrendingUp className="w-4 h-4 text-teal-600" />}
           loading={loading}
         />
         <BigStat
-          label="Portfolio actual XIRR"
+          label="Actual XIRR"
           value={formatPercent(portfolioActualXirr)}
           note={comparisonNote}
           icon={
@@ -260,7 +248,11 @@ export default function DashboardPage() {
                 <Tooltip formatter={(value) => `${value}%`} />
                 <Legend />
                 <Bar dataKey="Planned" fill="#94a3b8" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Actual" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Actual" radius={[4, 4, 0, 0]}>
+                  {xirrChartData.map((entry, i) => (
+                    <Cell key={i} fill={entry.actualColor} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -273,9 +265,19 @@ export default function DashboardPage() {
           <div className="bg-white rounded-xl border border-slate-200 p-4">
             <h2 className="text-sm font-semibold text-slate-700 mb-3 uppercase tracking-wide">Concentration — top borrowers</h2>
             <div className="space-y-3">
-              {analytics.topBorrowers.map((row) => (
-                <ConcentrationBar key={row.label} row={row} barColor="bg-teal-500" maxPercent={maxBorrowerPercent} />
-              ))}
+              {analytics.topBorrowers.map((row) => {
+                const referral = row.referralId ? referralById.get(row.referralId) : undefined;
+                const colorHex = referral ? getReferralColor(referral.color_seq).chart : undefined;
+                return (
+                  <ConcentrationBar
+                    key={row.label}
+                    row={row}
+                    barColor="bg-teal-500"
+                    colorHex={colorHex}
+                    maxPercent={maxBorrowerPercent}
+                  />
+                );
+              })}
             </div>
           </div>
           <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -316,14 +318,22 @@ export default function DashboardPage() {
             <span className="text-xs text-slate-400">(planned − actual XIRR)</span>
           </div>
           <div className="divide-y divide-slate-100">
-            {analytics.yieldLeakage.map((row) => (
+            {analytics.yieldLeakage.map((row) => {
+              const referral = referralById.get(row.referralId);
+              const colorHex = referral ? getReferralColor(referral.color_seq).chart : undefined;
+              return (
               <Link
                 key={row.loanId}
                 href={`/loans/${row.loanId}`}
                 className="flex items-center justify-between px-4 py-3 hover:bg-slate-50"
               >
                 <div>
-                  <div className="text-sm font-medium text-slate-800">{row.borrowerName}</div>
+                  <div
+                    className={`text-sm font-medium ${colorHex ? "" : "text-slate-800"}`}
+                    style={colorHex ? { color: colorHex } : undefined}
+                  >
+                    {row.borrowerName}
+                  </div>
                   <div className="text-xs text-slate-400">
                     {row.lateCount} late · {row.shortCount} short
                   </div>
@@ -336,7 +346,8 @@ export default function DashboardPage() {
                   </span>
                 </div>
               </Link>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -421,23 +432,33 @@ function EmptyChartState({ note }: { note?: string }) {
 function ConcentrationBar({
   row,
   barColor,
+  colorHex,
   maxPercent,
 }: {
   row: { label: string; amount: number; percent: number };
   barColor: string;
+  colorHex?: string;
   maxPercent: number;
 }) {
   const widthPct = Math.max(2, (row.percent / maxPercent) * 100);
   return (
     <div>
       <div className="flex items-center justify-between text-sm mb-1">
-        <span className="text-slate-700 font-medium truncate">{row.label}</span>
+        <span
+          className={`font-medium truncate ${colorHex ? "" : "text-slate-700"}`}
+          style={colorHex ? { color: colorHex } : undefined}
+        >
+          {row.label}
+        </span>
         <span className="text-slate-400 text-xs whitespace-nowrap ml-2">
           {formatINR(row.amount)} · {row.percent.toFixed(0)}%
         </span>
       </div>
       <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${widthPct}%` }} />
+        <div
+          className={`h-full rounded-full ${colorHex ? "" : barColor}`}
+          style={{ width: `${widthPct}%`, backgroundColor: colorHex }}
+        />
       </div>
     </div>
   );
