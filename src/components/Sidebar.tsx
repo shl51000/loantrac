@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -86,12 +87,8 @@ export default function Sidebar() {
             <span className="block w-6 h-0.5 bg-white mb-1.5" />
             <span className="block w-6 h-0.5 bg-white" />
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 border-2 border-slate-300 flex items-center justify-center shrink-0">
-              <span className="text-[10px] font-serif font-bold text-teal-400">SF</span>
-            </div>
-            <span className="text-white font-bold text-lg">LoanTrac</span>
-          </div>
+          <Image src="/logo-teal-white-trim.png" alt="Singhvi Fintech" width={94} height={40} className="shrink-0" />
+          <span className="sr-only">LoanTrac</span>
         </div>
       )}
 
@@ -291,22 +288,18 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
 
   return (
     <div className="flex flex-col min-h-full text-slate-200 pb-4">
-      <div className="p-5 pb-4 hidden md:block">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 border-2 border-slate-300 flex items-center justify-center shrink-0">
-            <span className="text-sm font-serif font-bold text-teal-400">SF</span>
-          </div>
-          <span className="text-white font-bold text-lg leading-tight">LoanTrac</span>
-        </div>
-        <div className="text-teal-400 text-xs leading-tight mt-1 pl-[52px]">Payment &amp; XIRR tracker</div>
+      <div className="p-4 pb-3 hidden md:block">
+        <Image src="/logo-teal-white-trim.png" alt="Singhvi Fintech" width={140} height={60} className="mb-1" />
+        <span className="text-white font-bold text-lg leading-tight">LoanTrac</span>
+        <div className="text-teal-400 text-xs leading-tight mt-0.5">Payment &amp; XIRR tracker</div>
       </div>
 
-      <nav className="px-3 space-y-1">
+      <nav className="px-3 space-y-0.5">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
           const base =
-            "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors";
+            "flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors";
           const style = item.primary
             ? "bg-teal-600 text-white hover:bg-teal-700"
             : active
@@ -332,11 +325,11 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
       </nav>
 
       {referrals.length > 0 && (
-        <div className="px-3 mt-3 flex flex-nowrap gap-1 overflow-x-auto">
+        <div className="px-3 mt-2 flex flex-wrap gap-1">
           <button
             onClick={() => setActiveReferralId(null)}
             className={
-              "shrink-0 text-xs font-semibold rounded-full px-2 py-1 " +
+              "shrink-0 text-xs font-semibold rounded-full px-1.5 py-0.5 " +
               (activeReferralId === null
                 ? "bg-white text-slate-900"
                 : "bg-slate-800 text-slate-300 hover:bg-slate-700")
@@ -352,7 +345,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
                 key={r.id}
                 onClick={() => setActiveReferralId(r.id)}
                 className={
-                  "shrink-0 text-xs font-semibold rounded-full px-2 py-1 flex items-center gap-1 " +
+                  "shrink-0 text-xs font-semibold rounded-full px-1.5 py-0.5 flex items-center gap-1 " +
                   (active ? color.tabActiveBg + " " + color.tabActiveText : "bg-slate-800 text-slate-300 hover:bg-slate-700")
                 }
               >
@@ -364,7 +357,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         </div>
       )}
 
-      <div className="px-3 mt-3 flex items-center justify-between">
+      <div className="px-3 mt-2 flex items-center justify-between">
         <Link
           href="/active-loans"
           onClick={onNavigate}
@@ -386,7 +379,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         </select>
       </div>
 
-      <div className="px-3 mt-2 flex-1 space-y-1.5">
+      <div className="px-3 mt-1.5 flex-1 space-y-1">
         {sortedLoans.length === 0 && (
           <p className="text-xs text-slate-500 px-1 py-2">
             No active loans yet.{" "}
@@ -404,7 +397,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
               key={loan.id}
               href={`/loans/${loan.id}`}
               onClick={onNavigate}
-              className="block rounded-lg bg-slate-800/60 hover:bg-slate-800 px-3 py-2"
+              className="block rounded-lg bg-slate-800/60 hover:bg-slate-800 px-3 py-1.5"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -412,7 +405,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
                     <span className="truncate">{loan.borrowers?.name ?? "Unknown borrower"}</span>
                   </div>
-                  <div className="text-xs text-slate-400 mt-0.5">
+                  <div className="text-xs text-slate-400">
                     {formatINR(
                       loan.loan_type === "ON_CALL" ? oncallOutstandingByLoan.get(loan.id) ?? loan.loan_amount : loan.loan_amount
                     )}
@@ -424,7 +417,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
                       ? "On-call"
                       : `${emiProgressByLoan.get(loan.id)?.paid ?? 0} / ${emiProgressByLoan.get(loan.id)?.total ?? 0}`}
                   </div>
-                  <div className="text-xs text-slate-400 mt-0.5">{formatDate(loan.disbursement_date)}</div>
+                  <div className="text-xs text-slate-400">{formatDate(loan.disbursement_date)}</div>
                 </div>
               </div>
             </Link>
@@ -432,11 +425,11 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
         })}
       </div>
 
-      <div className="px-3 mt-3">
+      <div className="px-3 mt-2">
         <Link
           href="/closed-loans"
           onClick={onNavigate}
-          className="flex items-center justify-between text-sm text-slate-300 hover:text-white px-1 py-1.5"
+          className="flex items-center justify-between text-sm text-slate-300 hover:text-white px-1 py-1"
         >
           <span>Closed loans</span>
           <span className="text-xs bg-slate-800 rounded-full px-2 py-0.5">{closedCount}</span>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -71,9 +72,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-16 h-16 border-2 border-slate-300 flex items-center justify-center mb-4">
-            <span className="text-2xl font-serif font-bold text-teal-400">SF</span>
-          </div>
+          <Image src="/logo-teal-white.png" alt="Singhvi Fintech" width={280} height={152} className="mb-4" priority />
           <h1 className="text-xl font-bold text-white">LoanTrac</h1>
         </div>
 
