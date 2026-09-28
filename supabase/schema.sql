@@ -91,6 +91,25 @@ create table if not exists public.borrowers (
 );
 alter table public.borrowers enable row level security;
 
+-- KYC details. Nullable so borrowers created via quick-add (New Loan / Edit
+-- Loan) and rows created before these columns existed stay valid.
+-- `name` is the short name shown across the app; `legal_name` is reference only.
+alter table public.borrowers add column if not exists legal_name text;
+alter table public.borrowers add column if not exists email text;
+alter table public.borrowers add column if not exists address text;
+alter table public.borrowers add column if not exists pan text;
+alter table public.borrowers add column if not exists entity_type text not null default 'INDIVIDUAL';
+alter table public.borrowers drop constraint if exists borrowers_entity_type_check;
+alter table public.borrowers add constraint borrowers_entity_type_check
+  check (entity_type in ('INDIVIDUAL','COMPANY','LLP','PARTNERSHIP','OTHERS'));
+-- Individual only
+alter table public.borrowers add column if not exists aadhaar text;
+-- Non-individual only
+alter table public.borrowers add column if not exists auth_person_name text;
+alter table public.borrowers add column if not exists auth_person_pan text;
+alter table public.borrowers add column if not exists auth_person_aadhaar text;
+alter table public.borrowers add column if not exists auth_person_address text;
+
 drop policy if exists "borrowers_select" on public.borrowers;
 create policy "borrowers_select" on public.borrowers for select using (auth.uid() is not null);
 drop policy if exists "borrowers_insert" on public.borrowers;

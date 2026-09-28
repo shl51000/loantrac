@@ -255,7 +255,7 @@ export default function LoanDetailPage() {
   }
 
   async function handleEditAddBorrower() {
-    if (!editNewBorrowerName.trim()) return;
+    if (!editNewBorrowerName.trim() || !editNewBorrowerWhatsapp.trim()) return;
     try {
       const created = await addBorrower(supabase, editNewBorrowerName, editNewBorrowerWhatsapp);
       setBorrowers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
@@ -1069,13 +1069,13 @@ export default function LoanDetailPage() {
                     <input
                       value={editNewBorrowerName}
                       onChange={(e) => setEditNewBorrowerName(e.target.value)}
-                      placeholder="Borrower name"
+                      placeholder="Borrower short name"
                       className={inputClass}
                     />
                     <input
                       value={editNewBorrowerWhatsapp}
                       onChange={(e) => setEditNewBorrowerWhatsapp(e.target.value)}
-                      placeholder="WhatsApp number (optional, e.g. 919xxxxxxxxx)"
+                      placeholder="WhatsApp number (e.g. 919xxxxxxxxx)"
                       className={inputClass}
                     />
                     <div className="flex gap-2">

@@ -139,7 +139,7 @@ export default function NewLoanPage() {
   ]);
 
   async function handleAddBorrower() {
-    if (!newBorrowerName.trim()) return;
+    if (!newBorrowerName.trim() || !newBorrowerWhatsapp.trim()) return;
     try {
       const created = await addBorrower(
         supabase,
@@ -343,13 +343,13 @@ export default function NewLoanPage() {
               <input
                 value={newBorrowerName}
                 onChange={(e) => setNewBorrowerName(e.target.value)}
-                placeholder="Borrower name"
+                placeholder="Borrower short name"
                 className={inputClass}
               />
               <input
                 value={newBorrowerWhatsapp}
                 onChange={(e) => setNewBorrowerWhatsapp(e.target.value)}
-                placeholder="WhatsApp number (optional, e.g. 919xxxxxxxxx)"
+                placeholder="WhatsApp number (e.g. 919xxxxxxxxx)"
                 className={inputClass}
               />
               <div className="flex gap-2">
