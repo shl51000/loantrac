@@ -50,13 +50,13 @@ function waLink(phone: string, message: string): string {
 
 function borrowerMessage(borrowerName: string, amount: string, dueDate: string, overdue: boolean): string {
   return overdue
-    ? `Hi ${borrowerName}, this is a reminder that your loan installment of *${amount}* was due on *${dueDate}* and is now overdue. Kindly arrange payment at the earliest. Thank you.`
+    ? `Hi *${borrowerName}*, your loan installment of *${amount}* was due on *${dueDate}* and is now *OVERDUE*. Kindly arrange payment immediately. Thank you.`
     : `Hi ${borrowerName}, this is a reminder that your loan installment of *${amount}* is due on *${dueDate}*. Kindly ensure timely payment. Thank you.`;
 }
 
 function referralMessage(borrowerName: string, amount: string, dueDate: string, overdue: boolean): string {
   return overdue
-    ? `Hi, an update on ${borrowerName}'s loan referred by you — the installment of *${amount}* was due on *${dueDate}* and is currently overdue. Please follow up if you can. Thank you.`
+    ? `Hi, *${borrowerName}'s* loan referred by you — installment of *${amount}* was due on *${dueDate}* and is still *UNPAID*. Please follow up. Thank you.`
     : `Hi, an update on ${borrowerName}'s loan referred by you — the installment of *${amount}* is due on *${dueDate}*. Just a heads-up. Thank you.`;
 }
 

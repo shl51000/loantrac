@@ -35,6 +35,16 @@ import { notifyLoansChanged } from "@/lib/loansRefresh";
 import { getErrorMessage } from "@/lib/errors";
 import { getOncallAccrual } from "@/lib/oncallAccrual";
 import {
+  generateLoanAgreement,
+  agreementKind,
+  freezeAgreementLoanId,
+  loadCorporateDetails,
+  saveCorporateDetails,
+  type SavedCorporateDetails,
+  type AgreementInputs,
+  type MissingItem,
+} from "@/lib/loanAgreement";
+import {
   IconGrid,
   IconCalendar,
   IconBarChart,
@@ -44,6 +54,7 @@ import {
   IconWarning,
   IconTrash,
   IconPrint,
+  IconFileText,
 } from "@/components/icons";
 
 function formatPercent(value: number | null): string {
@@ -76,7 +87,8 @@ interface LoanRow {
   closure_date: string | null;
   closure_settlement_amount: number | null;
   closure_notes: string | null;
-  borrowers: { name: string } | null;
+  agreement_loan_id: string | null;
+  borrowers: { name: string; entity_type: string } | null;
   referrals: { name: string; color_seq: number } | null;
 }
 
@@ -141,7 +153,7 @@ export default function LoanDetailPage() {
   const [installments, setInstallments] = useState<EmiInstallmentRow[]>([]);
   const [receipts, setReceipts] = useState<EmiReceiptRow[]>([]);
   const [transactions, setTransactions] = useState<OncallTxnRow[]>([]);
-  const [tab, setTab] = useState<"overview" | "schedule" | "ledger" | "reports">("overview");
+  const [tab, setTab] = useState<"overview" | "schedule" | "ledger" | "reports" | "agreement">("overview");
   const [borrowers, setBorrowers] = useState<Borrower[]>([]);
   const [referrals, setReferrals] = useState<Referral[]>([]);
 
@@ -176,6 +188,15 @@ export default function LoanDetailPage() {
   const [editRoutingAccountName, setEditRoutingAccountName] = useState("");
   const [editBasicsSubmitting, setEditBasicsSubmitting] = useState(false);
   const [editBasicsError, setEditBasicsError] = useState<string | null>(null);
+  // Which download is being prepared, if any.
+  const [agreementGenerating, setAgreementGenerating] = useState<"letterhead" | "plain" | null>(null);
+  const [agreementError, setAgreementError] = useState<string | null>(null);
+  const [agreementMissing, setAgreementMissing] = useState<MissingItem[] | null>(null);
+  // null until the user edits the form; defaults are derived from the loan at render.
+  const [agreementInputs, setAgreementInputs] = useState<AgreementInputs | null>(null);
+  const [agreementLoanIdError, setAgreementLoanIdError] = useState<string | null>(null);
+  // Corporate details stored from earlier downloads; null until loaded.
+  const [savedCorporate, setSavedCorporate] = useState<SavedCorporateDetails | null>(null);
 
   const editParsedDisbursementDate = useMemo(
     () => parseFlexibleDate(editDisbursementDateText),
@@ -185,7 +206,7 @@ export default function LoanDetailPage() {
   const loadAll = useCallback(async () => {
     const { data: loanData, error } = await supabase
       .from("loans")
-      .select("*, borrowers(name), referrals(name, color_seq)")
+      .select("*, borrowers(name, entity_type), referrals(name, color_seq)")
       .eq("id", id)
       .single();
 
@@ -232,6 +253,64 @@ export default function LoanDetailPage() {
     })();
   }, [loadAll]);
 
+  // Corporate agreements: load the registration no., signatory designation and
+  // resolution reference saved from earlier downloads.
+  const [corporateLoadError, setCorporateLoadError] = useState<string | null>(null);
+  const needsCorporateDetails =
+    tab === "agreement" &&
+    loan !== null &&
+    savedCorporate === null &&
+    agreementKind(loan.borrowers?.entity_type ?? "INDIVIDUAL") === "CORPORATE";
+  useEffect(() => {
+    if (!needsCorporateDetails || !loan) return;
+    let cancelled = false;
+    loadCorporateDetails(supabase, loan.borrower_id, id)
+      .then((details) => {
+        if (cancelled) return;
+        setSavedCorporate(details);
+        // If another field (e.g. Penal Charges) was edited meanwhile, the form
+        // already holds empty values for these; fill them in.
+        setAgreementInputs((prev) =>
+          prev
+            ? {
+                ...prev,
+                cin: details.registrationNo,
+                signatoryDesignation: details.signatoryDesignation,
+                boardResolution: details.resolutionRef,
+              }
+            : prev
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) setCorporateLoadError(getErrorMessage(err, "Could not load the saved details."));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per loan; `loan` itself changes on every reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, id, needsCorporateDetails]);
+
+  // The Loan ID is assigned and saved the first time the Loan Agreement tab is
+  // opened, then stays fixed.
+  const needsAgreementLoanId = tab === "agreement" && loan !== null && !loan.agreement_loan_id;
+  useEffect(() => {
+    if (!needsAgreementLoanId || !loan) return;
+    let cancelled = false;
+    freezeAgreementLoanId(supabase, loan)
+      .then((code) => {
+        if (!cancelled) setLoan((prev) => (prev ? { ...prev, agreement_loan_id: code } : prev));
+      })
+      .catch((err) => {
+        if (!cancelled) setAgreementLoanIdError(getErrorMessage(err, "Could not assign a Loan ID."));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per loan when the ID is missing; `loan` itself changes on every reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, needsAgreementLoanId]);
+
   function startEditBasics() {
     if (!loan) return;
     setEditBorrowerId(loan.borrower_id);
@@ -252,6 +331,40 @@ export default function LoanDetailPage() {
     setEditRoutingAccountName(loan.routing_account_name ?? "");
     setEditBasicsError(null);
     setEditingBasics(true);
+  }
+
+  async function handleLoanAgreement(inputs: AgreementInputs, letterhead: boolean) {
+    setAgreementError(null);
+    setAgreementMissing(null);
+    setAgreementGenerating(letterhead ? "letterhead" : "plain");
+    try {
+      // Keep what was typed for next time; a failed save doesn't block the download.
+      if (loan && savedCorporate && agreementKind(loan.borrowers?.entity_type ?? "INDIVIDUAL") === "CORPORATE") {
+        try {
+          setSavedCorporate(await saveCorporateDetails(supabase, loan.borrower_id, id, savedCorporate, inputs));
+        } catch (err) {
+          setAgreementError(getErrorMessage(err, "Could not save the registration / signatory / resolution details."));
+        }
+      }
+      const result = await generateLoanAgreement(supabase, id, inputs, { letterhead });
+      if (!result.ok) {
+        setAgreementError(result.error);
+        return;
+      }
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setAgreementMissing(result.missing);
+    } catch (err) {
+      setAgreementError(getErrorMessage(err, "Could not prepare the Loan Agreement."));
+    } finally {
+      setAgreementGenerating(null);
+    }
   }
 
   async function handleEditAddBorrower() {
@@ -923,13 +1036,55 @@ export default function LoanDetailPage() {
       ? "text-emerald-700"
       : "text-slate-800";
 
+  const agreementForm: AgreementInputs = {
+    ...(agreementInputs ?? {
+      guarantor: "",
+      penalRate: "2",
+      cin: savedCorporate?.registrationNo ?? "",
+      signatoryDesignation: savedCorporate?.signatoryDesignation ?? "",
+      boardResolution: savedCorporate?.resolutionRef ?? "",
+    }),
+    // Fixed once assigned; not editable on the form.
+    loanCode: loan.agreement_loan_id ?? "",
+  };
+  const agreementType = agreementKind(loan.borrowers?.entity_type ?? "INDIVIDUAL");
+  const corporateLoading = savedCorporate === null && !corporateLoadError;
+  // Field labels follow the borrower's constitution, as the agreement's wording does.
+  const corporateLabels =
+    loan.borrowers?.entity_type === "LLP"
+      ? {
+          registration: "LLPIN",
+          designation: "Authorised Signatory – Designation / DPIN",
+          designationExample: "e.g. Designated Partner, DPIN 01234567",
+          resolution: "Partners' Resolution – Reference & Date",
+          resolutionExample: "e.g. PR/2026/07 dated 20-09-2026",
+        }
+      : loan.borrowers?.entity_type === "PARTNERSHIP"
+        ? {
+            registration: "Firm Registration No.",
+            designation: "Authorised Signatory – Designation",
+            designationExample: "e.g. Managing Partner",
+            resolution: "Partners' Consent – Reference & Date",
+            resolutionExample: "e.g. Partners' letter dated 20-09-2026",
+          }
+        : {
+            registration: "CIN / LLPIN",
+            designation: "Authorised Signatory – Designation / DIN",
+            designationExample: "e.g. Director, DIN 01234567",
+            resolution: "Board Resolution – Reference & Date",
+            resolutionExample: "e.g. BR/2026/07 dated 20-09-2026",
+          };
+
   const tabList =
-    loan.loan_type === "EMI" ? (["overview", "schedule", "reports"] as const) : (["overview", "ledger"] as const);
+    loan.loan_type === "EMI"
+      ? (["overview", "schedule", "reports", "agreement"] as const)
+      : (["overview", "ledger", "agreement"] as const);
   const tabMeta: Record<string, { label: string; icon: ComponentType<{ className?: string }> }> = {
     overview: { label: "Overview", icon: IconGrid },
     schedule: { label: "Schedule & payments", icon: IconCalendar },
     reports: { label: "Reports & XIRR", icon: IconBarChart },
     ledger: { label: "Ledger", icon: IconCalendar },
+    agreement: { label: "Loan Agreement", icon: IconFileText },
   };
 
   return (
@@ -1914,6 +2069,169 @@ export default function LoanDetailPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {tab === "agreement" && (
+        <div className="mt-4 space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-700">
+                Loan Agreement ({agreementType === "INDIVIDUAL" ? "Individual" : "Corporate"})
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                Confirm these details, then download the Word agreement filled with this loan&apos;s and borrower&apos;s
+                details, including the KFS and repayment schedule
+                {agreementType === "CORPORATE" &&
+                  ". The borrower's authorised person signs for the company and as Guarantor"}
+                .
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={labelClass}>Loan ID</label>
+                <input
+                  className={inputClass + " bg-slate-50 font-semibold text-slate-700"}
+                  value={agreementForm.loanCode || (agreementLoanIdError ? "" : "Assigning…")}
+                  readOnly
+                />
+                {agreementLoanIdError ? (
+                  <p className="text-xs text-rose-600 mt-1">{agreementLoanIdError}</p>
+                ) : (
+                  <p className="text-xs text-slate-400 mt-1">Fixed for this loan · FY + DD + MM + letter</p>
+                )}
+              </div>
+              {agreementType === "INDIVIDUAL" ? (
+                <div>
+                  <label className={labelClass}>Guarantor Name (if any)</label>
+                  <input
+                    className={inputClass}
+                    value={agreementForm.guarantor}
+                    placeholder="N/A"
+                    onChange={(e) => setAgreementInputs({ ...agreementForm, guarantor: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className={labelClass}>{corporateLabels.registration}</label>
+                    <input
+                      className={inputClass}
+                      value={agreementForm.cin}
+                      disabled={corporateLoading}
+                      onChange={(e) => setAgreementInputs({ ...agreementForm, cin: e.target.value.toUpperCase() })}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>{corporateLabels.designation}</label>
+                    <input
+                      className={inputClass}
+                      value={agreementForm.signatoryDesignation}
+                      disabled={corporateLoading}
+                      placeholder={corporateLabels.designationExample}
+                      onChange={(e) => setAgreementInputs({ ...agreementForm, signatoryDesignation: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>{corporateLabels.resolution}</label>
+                    <input
+                      className={inputClass}
+                      value={agreementForm.boardResolution}
+                      disabled={corporateLoading}
+                      placeholder={corporateLabels.resolutionExample}
+                      onChange={(e) => setAgreementInputs({ ...agreementForm, boardResolution: e.target.value })}
+                    />
+                  </div>
+                  <p className={"text-xs sm:col-span-2 -mt-2 " + (corporateLoadError ? "text-rose-600" : "text-slate-400")}>
+                    {corporateLoadError
+                      ? `Saved details couldn't be loaded: ${corporateLoadError}`
+                      : corporateLoading
+                        ? "Loading saved details…"
+                        : `Saved when you download: ${corporateLabels.registration} and designation for this borrower (reused for its other loans), the reference for this loan.`}
+                  </p>
+                </>
+              )}
+              <div>
+                <label className={labelClass}>Penal Charges (% p.m.)</label>
+                <input
+                  className={inputClass}
+                  inputMode="decimal"
+                  value={agreementForm.penalRate}
+                  onChange={(e) => setAgreementInputs({ ...agreementForm, penalRate: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => handleLoanAgreement(agreementForm, true)}
+                disabled={agreementGenerating !== null || !agreementForm.loanCode.trim()}
+                className="bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold rounded-lg px-4 py-2 disabled:opacity-60"
+              >
+                {agreementGenerating === "letterhead" ? "Preparing…" : "Download Word (with letterhead)"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLoanAgreement(agreementForm, false)}
+                disabled={agreementGenerating !== null || !agreementForm.loanCode.trim()}
+                className="border border-teal-600 text-teal-700 hover:bg-teal-50 text-sm font-semibold rounded-lg px-4 py-2 disabled:opacity-60"
+              >
+                {agreementGenerating === "plain" ? "Preparing…" : "Download Word (without letterhead)"}
+              </button>
+            </div>
+          </div>
+
+          {agreementError && (
+            <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{agreementError}</p>
+          )}
+          {agreementMissing && (
+            <div
+              className={
+                "text-sm rounded-lg px-3 py-2 border " +
+                (agreementMissing.length
+                  ? "bg-amber-50 border-amber-200 text-amber-900"
+                  : "bg-emerald-50 border-emerald-200 text-emerald-800")
+              }
+            >
+              {agreementMissing.length === 0 ? (
+                <p>Loan Agreement downloaded. All fields were filled.</p>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-semibold">
+                      Loan Agreement downloaded. {agreementMissing.length} item
+                      {agreementMissing.length === 1 ? " is" : "s are"} missing and highlighted in yellow in the
+                      document:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setAgreementMissing(null)}
+                      className="text-xs text-amber-800 hover:underline shrink-0"
+                    >
+                      dismiss
+                    </button>
+                  </div>
+                  <ul className="mt-2 space-y-2">
+                    {Object.entries(
+                      agreementMissing.reduce<Record<string, string[]>>((acc, m) => {
+                        (acc[m.section] ??= []).push(m.field);
+                        return acc;
+                      }, {})
+                    ).map(([section, fields]) => (
+                      <li key={section}>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">{section}</p>
+                        <ul className="list-disc pl-5">
+                          {fields.map((f) => (
+                            <li key={f}>{f}</li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

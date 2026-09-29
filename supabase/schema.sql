@@ -109,6 +109,11 @@ alter table public.borrowers add column if not exists auth_person_name text;
 alter table public.borrowers add column if not exists auth_person_pan text;
 alter table public.borrowers add column if not exists auth_person_aadhaar text;
 alter table public.borrowers add column if not exists auth_person_address text;
+-- Entered on the Loan Agreement tab (non-individual only) and reused for the
+-- borrower's later loans: CIN / LLPIN / firm registration no., and the
+-- authorised signatory's designation (with DIN/DPIN where applicable).
+alter table public.borrowers add column if not exists registration_no text;
+alter table public.borrowers add column if not exists auth_person_designation text;
 
 drop policy if exists "borrowers_select" on public.borrowers;
 create policy "borrowers_select" on public.borrowers for select using (auth.uid() is not null);
@@ -154,6 +159,15 @@ create table if not exists public.loans (
   created_at timestamptz not null default now()
 );
 alter table public.loans enable row level security;
+
+-- Loan ID printed on the Loan Agreement (e.g. "2026272709a"). Assigned the first
+-- time the loan's Loan Agreement tab is opened and never changed afterwards.
+alter table public.loans add column if not exists agreement_loan_id text;
+create unique index if not exists loans_agreement_loan_id_key
+  on public.loans (agreement_loan_id) where agreement_loan_id is not null;
+-- Non-individual loans: the board resolution / partners' consent reference and
+-- date for this loan, entered on the Loan Agreement tab.
+alter table public.loans add column if not exists agreement_resolution_ref text;
 
 drop policy if exists "loans_select" on public.loans;
 create policy "loans_select" on public.loans for select using (auth.uid() is not null);
