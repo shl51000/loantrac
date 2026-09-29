@@ -57,7 +57,7 @@ function borrowerMessage(borrowerName: string, amount: string, dueDate: string, 
 function referralMessage(borrowerName: string, amount: string, dueDate: string, overdue: boolean): string {
   return overdue
     ? `Hi, *${borrowerName}'s* loan referred by you — installment of *${amount}* was due on *${dueDate}* and is still *UNPAID*. Please follow up. Thank you.`
-    : `Hi, an update on ${borrowerName}'s loan referred by you — the installment of *${amount}* is due on *${dueDate}*. Just a heads-up. Thank you.`;
+    : `Hi, *${borrowerName}'s* loan referred by you — the installment of *${amount}* is due on *${dueDate}*. Just a heads-up. Thank you.`;
 }
 
 function monthLabel(key: string): string {
@@ -112,7 +112,9 @@ export default function RemindersPage() {
   }, [supabase]);
 
   useEffect(() => {
-    loadReminders();
+    (async () => {
+      await loadReminders();
+    })();
   }, [loadReminders]);
 
   const today = toISODateString(new Date());

@@ -36,7 +36,6 @@ export default function LoginPage() {
     });
 
     if (signInError || !data.user) {
-      // eslint-disable-next-line no-console
       console.error("[LoanTrac] sign-in failed:", signInError);
       setError(wrongPassphraseMessage);
       setSubmitting(false);
@@ -50,7 +49,6 @@ export default function LoginPage() {
       .single();
 
     if (profileError || !profile || profile.role !== selectedRole) {
-      // eslint-disable-next-line no-console
       console.error("[LoanTrac] profile/role check failed:", {
         profileError,
         profile,
